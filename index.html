@@ -483,6 +483,8 @@ function starsFor(id) {
   const c = Math.min(correctCount(id), MASTER_COUNT);
   return "⭐".repeat(c) + "☆".repeat(MASTER_COUNT - c);
 }
+// チーム名から「名称(ニックネーム)」のみを取り出す (例: ボストン・レッドソックス → レッドソックス)
+function nickOf(t) { const p = t.name.split("・"); return p[p.length - 1]; }
 
 /* ================= ナビゲーション ================= */
 document.querySelectorAll("nav button").forEach(b => {
@@ -601,7 +603,7 @@ function renderStudy(m) {
 }
 
 /* ================= クイズ ================= */
-let quizSetup = { lg: "ALL", dir: "t2s" };
+let quizSetup = { lg: "ALL", dir: "ns" };
 
 function renderQuiz(m) {
   if (!quiz) { renderQuizSetup(m); return; }
@@ -612,7 +614,7 @@ function renderQuiz(m) {
 function renderQuizSetup(m) {
   const lgPills = ["ALL","MLB","NFL"].map(lg =>
     `<button class="pill ${quizSetup.lg===lg?"active":""}" data-k="lg" data-v="${lg}">${lg==="ALL"?"⚾🏈 ミックス":lg==="MLB"?"⚾ MLBのみ":"🏈 NFLのみ"}</button>`).join("");
-  const dirPills = [["t2s","チーム → 州を当てる"],["s2t","州 → チームを当てる"],["mix","ミックス"]].map(([v,l]) =>
+  const dirPills = [["ns","名称 → 州"],["nc","名称 → 都市"],["sn","州 → 名称"],["mix","ミックス"]].map(([v,l]) =>
     `<button class="pill ${quizSetup.dir===v?"active":""}" data-k="dir" data-v="${v}">${l}</button>`).join("");
 
   const total = leagueFiltered(quizSetup.lg).length;
@@ -622,7 +624,7 @@ function renderQuizSetup(m) {
     <div class="q-card">
       <div class="q-emo">🎯</div>
       <div class="q-team">クイズに挑戦!</div>
-      <div class="q-ask">全${QUIZ_LEN}問 / マスター進捗: ${mastered}/${total}チーム 🏆<br>同じチームに${MASTER_COUNT}回正解するとマスター!</div>
+      <div class="q-ask">全${QUIZ_LEN}問 / マスター進捗: ${mastered}/${total}チーム 🏆<br>名称(ニックネーム)だけを見て本拠地を当てよう!<br>同じチームに${MASTER_COUNT}回正解するとマスター!</div>
     </div>
     <div class="opt-title">リーグを選ぶ</div>
     <div class="pill-row">${lgPills}</div>
@@ -653,48 +655,63 @@ function startQuiz() {
     if (picked.length >= QUIZ_LEN) break;
   }
   const questions = picked.map(t => {
-    const dir = quizSetup.dir === "mix" ? (Math.random() < 0.5 ? "t2s" : "s2t") : quizSetup.dir;
-    return dir === "t2s" ? makeT2S(t) : makeS2T(t);
+    let dir = quizSetup.dir;
+    if (dir === "mix") dir = ["ns", "nc", "sn"][Math.floor(Math.random() * 3)];
+    if (dir === "ns") return makeNS(t);
+    if (dir === "nc") return makeNC(t);
+    return makeSN(t);
   });
   quiz = { questions, idx: 0, score: 0, streak: 0, bestStreak: 0, answered: false };
   render();
 }
 
-// チーム → 州
-function makeT2S(team) {
+// 名称 → 州
+function makeNS(team) {
   const others = shuffle([...new Set(
     TEAMS.filter(t => t.lg === team.lg && t.region !== team.region).map(t => t.region)
   )]).slice(0, 3);
   const choices = shuffle([team.region, ...others]);
-  return { type: "t2s", team, choices, answer: team.region };
+  return { type: "ns", team, choices, answer: team.region };
 }
-// 州 → チーム
-function makeS2T(team) {
+// 名称 → 都市
+function makeNC(team) {
+  const others = shuffle([...new Set(
+    TEAMS.filter(t => t.lg === team.lg && t.city !== team.city).map(t => t.city)
+  )]).slice(0, 3);
+  const choices = shuffle([team.city, ...others]);
+  return { type: "nc", team, choices, answer: team.city };
+}
+// 州 → チーム(名称)
+function makeSN(team) {
   const decoys = shuffle(
     TEAMS.filter(t => t.lg === team.lg && t.region !== team.region)
   ).slice(0, 3);
   const choices = shuffle([team, ...decoys]);
-  return { type: "s2t", team, choices, answer: team.id };
+  return { type: "sn", team, choices, answer: team.id };
 }
 
 function renderQuestion(m) {
   const q = quiz.questions[quiz.idx];
   const t = q.team;
   let cardHTML, choicesHTML;
-  if (q.type === "t2s") {
+  if (q.type === "ns" || q.type === "nc") {
     cardHTML = `
       <div class="q-emo">${t.emoji}</div>
-      <div class="q-team"><span class="badge ${t.lg}">${t.lg}</span><br>${esc(t.name)}</div>
-      <div class="q-ask">の本拠地はどこ?</div>`;
-    choicesHTML = q.choices.map(code =>
-      `<button class="choice" data-v="${code}">${esc(REGIONS[code].name)}</button>`).join("");
+      <div class="q-team"><span class="badge ${t.lg}">${t.lg}</span><br>${esc(nickOf(t))}</div>
+      <div class="q-ask">の本拠地の${q.type === "ns" ? "州" : "都市"}は?</div>`;
+    if (q.type === "ns")
+      choicesHTML = q.choices.map(code =>
+        `<button class="choice" data-v="${code}">${esc(REGIONS[code].name)}</button>`).join("");
+    else
+      choicesHTML = q.choices.map(c =>
+        `<button class="choice" data-v="${esc(c)}">${esc(c)}</button>`).join("");
   } else {
     cardHTML = `
       <div class="q-emo">📍</div>
       <div class="q-team">${esc(REGIONS[t.region].name)}</div>
       <div class="q-ask">に本拠地がある${t.lg}チームはどれ?</div>`;
     choicesHTML = q.choices.map(c =>
-      `<button class="choice" data-v="${c.id}">${c.emoji} ${esc(c.name)}</button>`).join("");
+      `<button class="choice" data-v="${c.id}">${c.emoji} ${esc(nickOf(c))}</button>`).join("");
   }
 
   m.innerHTML = `
@@ -736,14 +753,16 @@ function answer(btn, q) {
     saveStore();
     const cheers = ["ナイス!", "正解!", "さすが!", "完璧!", "その調子!"];
     fb.innerHTML = `<span style="color:var(--ok)">⭕ ${cheers[Math.floor(Math.random()*cheers.length)]}</span>` +
+      `<span class="fact">${t.emoji} ${esc(nickOf(t))} → ${esc(t.city)} / ${esc(REGIONS[t.region].name)}</span>` +
       (isMastered(t.id) && correctCount(t.id) === MASTER_COUNT ? `<span class="fact">🏆 ${esc(t.name)} をマスターした!</span>` : "") +
       (t.note ? `<span class="fact">💡 ${esc(t.note)}</span>` : "");
     burstConfetti(ok && quiz.streak >= 3 ? 30 : 12);
   } else {
     quiz.streak = 0;
-    const correctLabel = q.type === "t2s" ? REGIONS[q.answer].name : t.name;
+    const correctLabel = q.type === "ns" ? REGIONS[q.answer].name : q.type === "nc" ? q.answer : nickOf(t);
     fb.innerHTML = `<span style="color:var(--ng)">❌ 残念… 正解は「${esc(correctLabel)}」</span>` +
-      `<span class="fact">${t.emoji} ${esc(t.name)} → ${esc(REGIONS[t.region].name)}(${esc(t.city)})</span>`;
+      `<span class="fact">${t.emoji} ${esc(nickOf(t))} → ${esc(t.city)} / ${esc(REGIONS[t.region].name)}</span>` +
+      (t.note ? `<span class="fact">💡 ${esc(t.note)}</span>` : "");
   }
   $("#nextWrap").innerHTML = `<button class="next-btn">${quiz.idx + 1 >= QUIZ_LEN ? "結果を見る 🏁" : "次の問題へ ▶"}</button>`;
   $("#nextWrap .next-btn").addEventListener("click", () => {
