@@ -245,6 +245,16 @@ nav button.active { color: var(--gold); }
   min-height: 24px;
 }
 .feedback .fact { display: block; font-size: 12px; color: var(--gold); font-weight: 500; margin-top: 6px; }
+.mini-map {
+  display: grid; grid-template-columns: repeat(11, 1fr); gap: 2px;
+  max-width: 230px; margin: 10px auto 2px;
+}
+.mini-tile {
+  aspect-ratio: 1; border-radius: 3px; background: #2e3160;
+  font-size: 7px; font-weight: 800; font-style: normal;
+  display: flex; align-items: center; justify-content: center; color: transparent;
+}
+.mini-tile.hit { background: var(--gold); color: #1a1a2e; box-shadow: 0 0 8px var(--gold); }
 .next-btn {
   width: 100%;
   background: var(--accent2); border: none; border-radius: 14px;
@@ -442,6 +452,62 @@ const TEAMS = [
   {id:"n-was", lg:"NFL", name:"ワシントン・コマンダース", en:"Washington Commanders", city:"ランドーバー", region:"DC", emoji:"🎖️", note:"首都D.C.のチーム(スタジアムはメリーランド州)"},
 ];
 
+// アメリカ人口上位50都市(チームの有無は無関係)。region は所在する州コード
+const CITIES = [
+  {name:"ニューヨーク", region:"NY"},
+  {name:"ロサンゼルス", region:"CA"},
+  {name:"シカゴ", region:"IL"},
+  {name:"ヒューストン", region:"TX"},
+  {name:"フェニックス", region:"AZ"},
+  {name:"フィラデルフィア", region:"PA"},
+  {name:"サンアントニオ", region:"TX"},
+  {name:"サンディエゴ", region:"CA"},
+  {name:"ダラス", region:"TX"},
+  {name:"サンノゼ", region:"CA"},
+  {name:"オースティン", region:"TX"},
+  {name:"ジャクソンビル", region:"FL"},
+  {name:"フォートワース", region:"TX"},
+  {name:"コロンバス", region:"OH"},
+  {name:"シャーロット", region:"NC"},
+  {name:"インディアナポリス", region:"IN"},
+  {name:"サンフランシスコ", region:"CA"},
+  {name:"シアトル", region:"WA"},
+  {name:"デンバー", region:"CO"},
+  {name:"オクラホマシティ", region:"OK"},
+  {name:"ナッシュビル", region:"TN"},
+  {name:"エルパソ", region:"TX"},
+  {name:"ワシントンD.C.", region:"DC"},
+  {name:"ラスベガス", region:"NV"},
+  {name:"ボストン", region:"MA"},
+  {name:"ポートランド", region:"OR"},
+  {name:"ルイビル", region:"KY"},
+  {name:"メンフィス", region:"TN"},
+  {name:"デトロイト", region:"MI"},
+  {name:"ボルチモア", region:"MD"},
+  {name:"ミルウォーキー", region:"WI"},
+  {name:"アルバカーキ", region:"NM"},
+  {name:"ツーソン", region:"AZ"},
+  {name:"フレズノ", region:"CA"},
+  {name:"サクラメント", region:"CA"},
+  {name:"メサ", region:"AZ"},
+  {name:"カンザスシティ", region:"MO"},
+  {name:"アトランタ", region:"GA"},
+  {name:"オマハ", region:"NE"},
+  {name:"コロラドスプリングス", region:"CO"},
+  {name:"ローリー", region:"NC"},
+  {name:"ロングビーチ", region:"CA"},
+  {name:"バージニアビーチ", region:"VA"},
+  {name:"マイアミ", region:"FL"},
+  {name:"オークランド", region:"CA"},
+  {name:"ミネアポリス", region:"MN"},
+  {name:"タルサ", region:"OK"},
+  {name:"ベーカーズフィールド", region:"CA"},
+  {name:"ウィチタ", region:"KS"},
+  {name:"アーリントン", region:"TX"},
+];
+// クイズの選択肢に使うアメリカの州コード(カナダは除外)
+const US_STATES = Object.keys(REGIONS).filter(k => k !== "CAN");
+
 const MASTER_COUNT = 3; // この回数正解でマスター
 const QUIZ_LEN = 10;
 
@@ -614,7 +680,7 @@ function renderQuiz(m) {
 function renderQuizSetup(m) {
   const lgPills = ["ALL","MLB","NFL"].map(lg =>
     `<button class="pill ${quizSetup.lg===lg?"active":""}" data-k="lg" data-v="${lg}">${lg==="ALL"?"⚾🏈 ミックス":lg==="MLB"?"⚾ MLBのみ":"🏈 NFLのみ"}</button>`).join("");
-  const dirPills = [["ns","名称 → 州"],["nc","名称 → 都市"],["sn","州 → 名称"],["mix","ミックス"]].map(([v,l]) =>
+  const dirPills = [["cs","都市 → 州"],["ns","名称 → 州"],["nc","名称 → 都市"],["sn","州 → 名称"],["mix","ミックス"]].map(([v,l]) =>
     `<button class="pill ${quizSetup.dir===v?"active":""}" data-k="dir" data-v="${v}">${l}</button>`).join("");
 
   const total = leagueFiltered(quizSetup.lg).length;
@@ -640,31 +706,68 @@ function renderQuizSetup(m) {
 }
 
 function startQuiz() {
-  const pool = leagueFiltered(quizSetup.lg);
-  // 未マスターのチームを優先して出題(重み付け)
-  const weighted = [];
-  pool.forEach(t => {
-    const w = isMastered(t.id) ? 1 : 3;
-    for (let i = 0; i < w; i++) weighted.push(t);
-  });
-  const picked = [];
-  const used = new Set();
-  const shuffled = shuffle(weighted);
-  for (const t of shuffled) {
-    if (!used.has(t.id)) { used.add(t.id); picked.push(t); }
-    if (picked.length >= QUIZ_LEN) break;
+  let questions;
+  if (quizSetup.dir === "cs") {
+    // 都市 → 州 はチームと無関係。上位50都市からランダムに出題
+    questions = shuffle(CITIES).slice(0, QUIZ_LEN).map(makeCS);
+  } else {
+    const pool = leagueFiltered(quizSetup.lg);
+    // 未マスターのチームを優先して出題(重み付け)
+    const weighted = [];
+    pool.forEach(t => {
+      const w = isMastered(t.id) ? 1 : 3;
+      for (let i = 0; i < w; i++) weighted.push(t);
+    });
+    const picked = [];
+    const used = new Set();
+    const shuffled = shuffle(weighted);
+    for (const t of shuffled) {
+      if (!used.has(t.id)) { used.add(t.id); picked.push(t); }
+      if (picked.length >= QUIZ_LEN) break;
+    }
+    questions = picked.map(t => {
+      let dir = quizSetup.dir;
+      if (dir === "mix") dir = ["ns", "nc", "sn"][Math.floor(Math.random() * 3)];
+      if (dir === "ns") return makeNS(t);
+      if (dir === "nc") return makeNC(t);
+      return makeSN(t);
+    });
   }
-  const questions = picked.map(t => {
-    let dir = quizSetup.dir;
-    if (dir === "mix") dir = ["ns", "nc", "sn"][Math.floor(Math.random() * 3)];
-    if (dir === "ns") return makeNS(t);
-    if (dir === "nc") return makeNC(t);
-    return makeSN(t);
-  });
   quiz = { questions, idx: 0, score: 0, streak: 0, bestStreak: 0, answered: false };
   render();
 }
 
+// 都市 → 州
+function makeCS(c) {
+  const others = shuffle(US_STATES.filter(s => s !== c.region)).slice(0, 3);
+  const choices = shuffle([c.region, ...others]);
+  return { type: "cs", city: c.name, region: c.region, choices, answer: c.region };
+}
+// 州がアメリカのどの辺にあるかを短い言葉で表す
+function areaLabel(code) {
+  if (code === "AK") return "アメリカ北西の果て(アラスカ)";
+  if (code === "HI") return "太平洋上の島(ハワイ)";
+  if (code === "DC") return "東海岸・首都ワシントン";
+  const [col, row] = REGIONS[code].grid;
+  const v = row <= 2 ? "北" : row <= 4 ? "中" : "南";
+  const h = col <= 2 ? "西" : col <= 6 ? "央" : "東";
+  const map = {
+    "北西":"北西部", "北央":"北部", "北東":"北東部",
+    "中西":"西部", "中央":"中部", "中東":"東部",
+    "南西":"南西部", "南央":"南部", "南東":"南東部",
+  };
+  return "アメリカ" + map[v + h];
+}
+// 解答した州の位置を示すミニ地図(該当州を金色でハイライト)
+function miniMap(code) {
+  let cells = "";
+  for (const [c, r] of Object.entries(REGIONS)) {
+    if (!r.grid) continue;
+    const hit = c === code;
+    cells += `<i class="mini-tile${hit ? " hit" : ""}" style="grid-column:${r.grid[0]+1};grid-row:${r.grid[1]+1}">${hit ? (c === "DC" ? "DC" : c) : ""}</i>`;
+  }
+  return `<div class="mini-map">${cells}</div>`;
+}
 // 名称 → 州
 function makeNS(team) {
   const others = shuffle([...new Set(
@@ -694,7 +797,14 @@ function renderQuestion(m) {
   const q = quiz.questions[quiz.idx];
   const t = q.team;
   let cardHTML, choicesHTML;
-  if (q.type === "ns" || q.type === "nc") {
+  if (q.type === "cs") {
+    cardHTML = `
+      <div class="q-emo">🏙️</div>
+      <div class="q-team">${esc(q.city)}</div>
+      <div class="q-ask">は何州にある?</div>`;
+    choicesHTML = q.choices.map(code =>
+      `<button class="choice" data-v="${code}">${esc(REGIONS[code].name)}</button>`).join("");
+  } else if (q.type === "ns" || q.type === "nc") {
     cardHTML = `
       <div class="q-emo">${t.emoji}</div>
       <div class="q-team"><span class="badge ${t.lg}">${t.lg}</span><br>${esc(nickOf(t))}</div>
@@ -743,26 +853,37 @@ function answer(btn, q) {
     else if (b === btn && !ok) b.classList.add("wrong");
   });
 
+  // 解答に対応する州コード(位置表示用)。都市問題は q.region、それ以外はチームの州
+  const stateCode = t ? t.region : q.region;
+  // 「都市/名称 → 都市 / 州」のおさらい行
+  const reveal = q.type === "cs"
+    ? `<span class="fact">🏙️ ${esc(q.city)} → ${esc(REGIONS[q.region].name)}</span>`
+    : `<span class="fact">${t.emoji} ${esc(nickOf(t))} → ${esc(t.city)} / ${esc(REGIONS[t.region].name)}</span>`;
+  // 州がアメリカのどの辺にあるか(方角ラベル + ミニ地図)
+  const geo = `<span class="fact">🧭 ${esc(areaLabel(stateCode))}</span>` + miniMap(stateCode);
+
   const fb = $("#fb");
   if (ok) {
     quiz.score++;
     quiz.streak++;
     quiz.bestStreak = Math.max(quiz.bestStreak, quiz.streak);
-    store.correct[t.id] = correctCount(t.id) + 1;
+    if (t) store.correct[t.id] = correctCount(t.id) + 1;
     if (quiz.streak > (store.bestStreak || 0)) store.bestStreak = quiz.streak;
     saveStore();
     const cheers = ["ナイス!", "正解!", "さすが!", "完璧!", "その調子!"];
     fb.innerHTML = `<span style="color:var(--ok)">⭕ ${cheers[Math.floor(Math.random()*cheers.length)]}</span>` +
-      `<span class="fact">${t.emoji} ${esc(nickOf(t))} → ${esc(t.city)} / ${esc(REGIONS[t.region].name)}</span>` +
-      (isMastered(t.id) && correctCount(t.id) === MASTER_COUNT ? `<span class="fact">🏆 ${esc(t.name)} をマスターした!</span>` : "") +
-      (t.note ? `<span class="fact">💡 ${esc(t.note)}</span>` : "");
-    burstConfetti(ok && quiz.streak >= 3 ? 30 : 12);
+      reveal +
+      (t && isMastered(t.id) && correctCount(t.id) === MASTER_COUNT ? `<span class="fact">🏆 ${esc(t.name)} をマスターした!</span>` : "") +
+      (t && t.note ? `<span class="fact">💡 ${esc(t.note)}</span>` : "") +
+      geo;
+    burstConfetti(quiz.streak >= 3 ? 30 : 12);
   } else {
     quiz.streak = 0;
-    const correctLabel = q.type === "ns" ? REGIONS[q.answer].name : q.type === "nc" ? q.answer : nickOf(t);
+    const correctLabel = (q.type === "ns" || q.type === "cs") ? REGIONS[q.answer].name : q.type === "nc" ? q.answer : nickOf(t);
     fb.innerHTML = `<span style="color:var(--ng)">❌ 残念… 正解は「${esc(correctLabel)}」</span>` +
-      `<span class="fact">${t.emoji} ${esc(nickOf(t))} → ${esc(t.city)} / ${esc(REGIONS[t.region].name)}</span>` +
-      (t.note ? `<span class="fact">💡 ${esc(t.note)}</span>` : "");
+      reveal +
+      (t && t.note ? `<span class="fact">💡 ${esc(t.note)}</span>` : "") +
+      geo;
   }
   $("#nextWrap").innerHTML = `<button class="next-btn">${quiz.idx + 1 >= QUIZ_LEN ? "結果を見る 🏁" : "次の問題へ ▶"}</button>`;
   $("#nextWrap .next-btn").addEventListener("click", () => {
